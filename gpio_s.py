@@ -66,7 +66,11 @@ def main(argv):
                 result = None
                 if None != process:
                     result = process.poll()
-                    logger.debug ('previous process finished with code %d' % result)
+                    if None != result:
+                        logger.debug ('previous process finished with code %d' % result)
+                    else:
+                        logger.debug ('process #%d still active' % process.pid)
+
 
                 if value == whileValue:
                     start = datetime.now()
@@ -75,8 +79,10 @@ def main(argv):
                         logger.debug ("starting process '%s'" % command)
                         # Start a new process if old one already exited
                         process = subprocess.Popen (command, shell=True)
+                        logger.debug ("process #%d started" % process.pid)
                 else:
                     if datetime.now() > start+timeout and None != process and None == process.poll():
+                        logger.debug ("terminating process #%d" % process.pid)
                         process.terminate ()
 
 
