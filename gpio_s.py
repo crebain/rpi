@@ -15,14 +15,15 @@ def main(argv):
     parser.add_argument ('arguments', nargs='*', metavar='ARGS', help='Optional arguments for CMD.')
     parser.add_argument ('-i', '--input', required=True, metavar='INPUT', type=argparse.FileType ('r'), help='The file to poll(2)')
     parser.add_argument ('-w', '--while', required=False, metavar='VALUE', default='1', help="Keeps CMD running while content of INPUT equals to VALUE. Default '1'")
-    parser.add_argument ('-t', '--timeout', required=False, metavar='TIMEOUT', type=int, default=0, help='Timeout when CMD will be terminated, in seconds. Defaults to 0, i.e. CMD will be terminated when VALUE does not match specified.')
+    parser.add_argument ('-t', '--timeout', required=False, metavar='TIMEOUT', type=int, default=None, help='Timeout when CMD will be terminated, in seconds. Defaults to 0, i.e. CMD will be terminated when VALUE does not match specified.')
     parser.add_argument ('-v', '--verbosity', required=False, metavar='LEVEL', default=logging.getLevelName (logging.WARNING), help='Verbosity level. See http://docs.python.org/2/library/logging.html for possible values.')
 
     args = vars (parser.parse_args())
 
     input = args['input']
     command = " ".join ([args['command']] + args['arguments'])
-    timeout = timedelta (seconds=args['timeout'])
+    timeoutSeconds = args['timeout']
+    timeout = timedelta (seconds=timeoutSeconds or 0)
     whileValue = args['while']
 
     logger = logging.getLogger(__package__)
@@ -44,6 +45,11 @@ def main(argv):
     logger.debug ('Input file is %s' % input)
     logger.debug ("Command to execute: '%(command)s'" % { 'command': command })
 
+    pollTimeout = None
+    if timeoutSeconds:
+        pollTimeout = timeoutSeconds * 1000
+        logger.debug ("Poll timeout %(pollTimeout)dms" % { 'pollTimeout': pollTimeout })
+
     process = None
     start = datetime.now()
 
@@ -51,7 +57,11 @@ def main(argv):
     poller.register (input, select.POLLPRI)
 
     while (True):
-        list = poller.poll ()
+        value = None
+        list = poller.poll (pollTimeout)
+
+        if not list:
+            logger.debug ('poll timed out')
 
         for entry in list:
             fd = entry[0]
@@ -63,27 +73,28 @@ def main(argv):
                 value = input.read ().strip ()
                 logger.debug ("read value '%s'" % value)
 
-                result = None
-                if None != process:
-                    result = process.poll()
-                    if None != result:
-                        logger.debug ('previous process finished with code %d' % result)
-                    else:
-                        logger.debug ('process #%d still active' % process.pid)
+
+        result = None
+        if None != process:
+            result = process.poll()
+            if None != result:
+                logger.debug ('previous process finished with code %d' % result)
+            else:
+                logger.debug ('process #%d still active' % process.pid)
 
 
-                if value == whileValue:
-                    start = datetime.now()
+        if value == whileValue:
+            start = datetime.now()
 
-                    if None == process or result != None:
-                        logger.debug ("starting process '%s'" % command)
-                        # Start a new process if old one already exited
-                        process = subprocess.Popen (command, shell=True)
-                        logger.debug ("process #%d started" % process.pid)
-                else:
-                    if datetime.now() > start+timeout and None != process and None == process.poll():
-                        logger.debug ("terminating process #%d" % process.pid)
-                        process.terminate ()
+            if None == process or result != None:
+                logger.debug ("starting process '%s'" % command)
+                # Start a new process if old one already exited
+                process = subprocess.Popen (command, shell=True)
+                logger.debug ("process #%d started" % process.pid)
+        else:
+            if datetime.now() > start+timeout and None != process and None == process.poll():
+                logger.debug ("terminating process #%d" % process.pid)
+                process.terminate ()
 
 
     os.close (input)
